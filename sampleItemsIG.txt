@@ -234,3 +234,14 @@ This is a Support Gem. It does not grant a bonus to your character, but to skill
 --------
 Corrupted
 
+
+Rarity: Normal
+Fire from the Sky
+--------
+Fire rains down across the land. Beware the path you take.
+--------
+You will discover an area with an Infernal Tempest
+--------
+Right-click to add this prophecy to your character.
+
+Tane
