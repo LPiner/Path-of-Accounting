@@ -1,6 +1,7 @@
 import re
 from typing import Optional
 
+from enums.rarity import Rarity
 from generators.rarity import generate_rarity
 from models.map import Map
 
@@ -19,6 +20,9 @@ def generate_map(text: str) -> Optional[Map]:
     text = text.strip()
 
     # Second line should be the name
+    """
+    If the map is a magic type then the name is merged with the prefixes and suffixs for some reason, which makes me really sad.
+    """
     if "Map" not in text.splitlines()[2]:
         # Map has no name
         name = None
@@ -28,14 +32,18 @@ def generate_map(text: str) -> Optional[Map]:
         name = text.splitlines()[1]
         map_type = text.splitlines()[2]
 
+    # Maps with quality need the Superior string stripped.
+    map_type = re.sub("Superior ", "", map_type)
+
     rarity = generate_rarity(text=text)
+
     tier = re.search("Map Tier: (\d+)", text)
     if tier:
         tier = int(tier.group(1))
 
-    quality = re.search("Quality: (\d+)%", text)
+    quality = re.search("Quality: \+(\d+)%", text)
     if quality:
-        quality = int(tier.group(1))
+        quality = int(quality.group(1))
     else:
         quality = None
 

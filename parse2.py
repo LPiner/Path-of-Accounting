@@ -9,11 +9,17 @@ import time
 from colorama import init, deinit, Fore, Back, Style
 from currency import (CURRENCY, OILS, CATALYSTS, FRAGMENTS_AND_SETS, INCUBATORS, SCARABS, RESONATORS,
                       FOSSILS, VIALS, ESSENCES, DIV_CARDS)
+from generators.card import generate_card
+from generators.currency import generate_currency
 from generators.map import generate_map
-from hotkeys import watch_keyboard
+#from hotkeys import watch_keyboard
 
 # Current Leagues. Not used.
+from generators.prophecy import generate_prophecy
+from models.card import Card
+from models.currency import Currency
 from models.map import Map
+from models.prophecy import Prophecy
 from protocols.searchable_trade_item import SearchableTradeItem
 
 leagues = requests.get(url="https://www.pathofexile.com/api/trade/data/leagues").json()
@@ -27,35 +33,46 @@ def create_searchable_item(text: str) -> Optional[SearchableTradeItem]:
         return None
 
     item = None
-    quality = re.search(r'Quality: \+(\d+)%', text)
-    if quality:
-        quality = int(quality.group(1))
     # Try to parse our new item.
     if 'Right-click to add this prophecy to your character' in text:
         # Prophecy
-        pass
+        item = generate_prophecy(text)
     elif 'Travel to this Map' in text:
         # Map
         item = generate_map(text)
+    elif 'Rarity: Divination Card' in text:
+        item = generate_card(text)
+    elif 'Rarity: Currency' in text:
+        item = generate_currency(text)
     else:
         item = None
 
     return item
 
+def get_item_price(item: SearchableTradeItem) -> None:
+    """
+    Maps, ETC use POE.ninja prices.
+    :param item:
+    :return:
+    """
+
 def build_query_from_item(item: SearchableTradeItem) -> dict:
-    query = defaultdict(dict)
-    query.setdefault()
+    query = {}
+    query['status'] = {}
     if isinstance(item, Map):
         if item.name:
             query['name'] = {}
             query['name']['discriminator'] = 'warfortheatlas'
-            query['name']['option']= item.name
+            query['name']['option'] = item.name
 
         query['type'] = {}
         query['type']['discriminator'] = 'warfortheatlas'
         query['type']['option'] = item.type
 
         # Part of the 'Map Filters' section
+        query['filters'] = {}
+        query['filters']['map_filters'] = {}
+        query['filters']['map_filters']['filters'] = {}
         if item.shaper:
             query['filters']['map_filters']['filters']['map_shaped'] = 'true'
         if item.elder:
@@ -63,20 +80,27 @@ def build_query_from_item(item: SearchableTradeItem) -> dict:
         if item.blighted:
             query['filters']['map_filters']['filters']['map_blighted'] = 'true'
 
-        # Not needed?
+        query['filters']['map_filters']['filters']['map_tier'] = {}
         query['filters']['map_filters']['filters']['map_tier']['max'] = item.tier
         query['filters']['map_filters']['filters']['map_tier']['min'] = item.tier
 
-        # IIQ, IIR, Packsize could go here but for price checking its probably not worth it
-
-
+        query['filters']['type_filters'] = {}
+        query['filters']['type_filters']['filters'] = {}
+        query['filters']['type_filters']['filters']['rarity'] = item.rarity.value.lower()
+    elif isinstance(item, Prophecy):
+        query['name'] = item.name
+        query['type'] = 'Prophecy'
+    elif isinstance(item, Card) or isinstance(item, Currency):
+        query['type'] = item.type
     else:
         raise NotImplementedError
 
     query['status']['option'] = 'online'
+    query = {'query': query}
+    query['sort'] = {}
     query['sort']['price'] = 'asc'
 
-    return {'query': query}
+    return query
 
 
 def parse_item_info(text):
@@ -763,7 +787,8 @@ def watch_clipboard():
                 info = None
                 trade_info = None
                 if item:
-                    query = requests.post(f'https://www.pathofexile.com/api/trade/search/metamorph', json=build_query_from_item(item))
+                    trade_query = build_query_from_item(item)
+                    query = requests.post(f'https://www.pathofexile.com/api/trade/search/metamorph', json=trade_query)
                     res = query.json()
                     trade_info = fetch(res)
 
@@ -868,6 +893,6 @@ if __name__ == "__main__":
     init(autoreset=True)  # Colorama
     root = Tk()
     root.withdraw()
-    watch_keyboard()
+    #watch_keyboard()
     watch_clipboard()
     deinit()  # Colorama

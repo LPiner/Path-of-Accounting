@@ -6,3 +6,5 @@ class Rarity(Enum):
     MAGIC = 'Magic'
     RARE = 'Rare'
     UNIQUE = 'Unique'
+    DIVINATION_CARD = 'Divination Card'
+    CURRENCY = 'Currency'

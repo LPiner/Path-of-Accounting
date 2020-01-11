@@ -1,6 +1,9 @@
-from attr import attrs
+from attr import attrs, attrib
+
+from enums.rarity import Rarity
 
 
 @attrs(auto_attribs=True)
 class Card:
-    pass
+    type: str
+    rarity: Rarity = attrib(default=Rarity.DIVINATION_CARD, init=False)

@@ -70,6 +70,29 @@ Travel to this Map by using it in a personal Map Device. Maps can only be used o
                 shaper=False,
                 elder=False, enslaver=False, eradicator=False, constrictor=False, purifier=False)
 
+        ],
+        [
+            """
+Rarity: Unique
+Superior Bone Crypt Map
+--------
+Map Tier: 4
+Item Quantity: +5% (augmented)
+Quality: +5% (augmented)
+--------
+Item Level: 68
+--------
+Unidentified
+--------
+Travel to this Map by using it in a personal Map Device. Maps can only be used once.
+            """,
+            Map(type="Bone Crypt Map", identified=False, rarity=Rarity.UNIQUE, tier=4, ilvl=68,
+                blighted=False,
+                iiq=5,
+                quality=5,
+                shaper=False,
+                elder=False, enslaver=False, eradicator=False, constrictor=False, purifier=False)
+
         ]
     ])
     def test_unique_maps(self, data: str, expected: Map):
