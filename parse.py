@@ -4,15 +4,27 @@ from tkinter import Tk, TclError
 import re
 import time
 from colorama import init, deinit, Fore, Back, Style
+import yaml
+
+#Local imports
 from currency import (CURRENCY, OILS, CATALYSTS, FRAGMENTS_AND_SETS, INCUBATORS, SCARABS, RESONATORS,
 						FOSSILS, VIALS, ESSENCES, DIV_CARDS)
-from hotkeys import watch_keyboard
+
+DEBUG = False
+
+# If using hotkeys, we also import the hotkeys local module in the main loop.
+# If using GUI, import GUI
+with open("settings.yaml", "r") as settings_file:
+	settings = yaml.safe_load(settings_file)
+
+if settings['use_gui'] == True:
+	import testGui
+
 
 # Current Leagues. Not used.
 leagues = requests.get(url="https://www.pathofexile.com/api/trade/data/leagues").json()
 # All available stats on items.
 stats = requests.get(url="https://www.pathofexile.com/api/trade/data/stats").json()
-
 
 def parse_item_info(text):
 	"""
@@ -35,6 +47,7 @@ def parse_item_info(text):
 
 	unident = bool(re.search('Unidentified', text, re.M))
 	metamorph = bool(re.search("Tane", text, re.M))
+	prophecy = bool(re.search("Right-click to add this prophecy to your character.", text, re.M))
 
 	# Get Qual
 	m = re.findall(r'Quality: \+(\d+)%', text)
@@ -45,6 +58,8 @@ def parse_item_info(text):
 		if info['itype'] == "--------":
 			info['itype'] = info['name']
 
+	if '<<set:MS>><<set:M>><<set:S>>' in info['name']: # For checking in chat items... For some reason this is added.
+		info['name'] = info['name'].replace('<<set:MS>><<set:M>><<set:S>>', "").strip()
 
 	# Oh, it's currency!
 	if info['rarity'] == 'Currency':
@@ -58,7 +73,10 @@ def parse_item_info(text):
 			info['itype'] = info['itype'].replace("Superior", "").strip()
 		map_mods = {}
 		map_mods['tier'] = re.findall(r"Map Tier: (\d+)", text)[0]
-		map_mods['iiq'] = re.findall(r"Item Quantity: \+(\d+)%", text)[0]
+
+		iiq_re = re.findall(r"Item Quantity: \+(\d+)%", text)
+		if len(iiq_re) > 0:
+			map_mods['iiq'] = iiq_re[0]
 
 		pack_re = re.findall(r"Pack Size: \+(\d+)%", text)
 		if len(pack_re) > 0:
@@ -68,7 +86,7 @@ def parse_item_info(text):
 		if len(iir_re) > 0:
 			map_mods['iir'] = iir_re[0]
 
-		map_mods['blight'] = bool(re.search("Blighted Map", text, re.M))
+		map_mods['blight'] = bool(re.search(r"Blighted", text, re.M))
 		map_mods['shaper'] = bool(re.search('Area is influenced by The Shaper', text, re.M))
 		map_mods['elder'] = bool(re.search('Area is influenced by The Elder', text, re.M))
 		map_mods['enslaver'] = bool(re.search('Map is occupied by The Enslaver', text, re.M))
@@ -94,6 +112,9 @@ def parse_item_info(text):
 
 		if m:
 			info['ilvl'] = int(m[0])
+
+	elif info['rarity'] == 'Normal' and prophecy: #Prophecies
+		info['itype'] = 'Prophecy'
 
 	else:
 		if info['rarity'] == 'Magic' or info['rarity'] == 'Normal':
@@ -140,6 +161,8 @@ def parse_item_info(text):
 
 		# Find all the affixes
 		m = re.findall(r'Item Level: \d+\n--------\n(.+)((?:\n.+)+)', text)
+		if DEBUG:
+			print("STATS:", m)
 
 		if m:
 			info['stats'] = []
@@ -147,16 +170,20 @@ def parse_item_info(text):
 			info['stats'].extend(m[0][1].split('\n'))
 
 			# Clean up the leftover stuff / Make it useable data
-			if "(implicit)" in info['stats'][0]:
-				del info['stats'][1:2]
+			if info['stats'][1] == "" and info['stats'][2] == "--------": #Implicits and enchantments.
+				del info['stats'][1:3]
 			elif "--------" in info['stats']:
 				index = info['stats'].index('--------')
+				print(info)
 				info['stats'] = info['stats'][:index]
 			else:
 				info['stats'] = info['stats'][:-1]
 			
 			if "" in info['stats']:
 				info['stats'].remove("")
+
+	if DEBUG:#DEBUG
+		print("COMPLETE INFO: ", info)
 
 	return info
 
@@ -168,6 +195,9 @@ def fetch(q_res, exchange = False):
 
 	returns JSON of all available similar items.
 	"""
+
+	if DEBUG:
+		print(q_res)
 
 	results = []
 	# Limited to crawling by 10 results at a time due to API restrictions, so check first 50
@@ -199,6 +229,9 @@ def fetch(q_res, exchange = False):
 	else:
 				print("[!] Something went horribly wrong. Please make an issue on the github page and include the item that caused this error. https://github.com/ethck/path-of-accounting/issues")
 
+	if DEBUG:
+		print(results)
+
 	return results
 
 
@@ -215,10 +248,20 @@ def query_trade(name = None, ilvl = None, itype = None, links = None, corrupted 
 	if maps is not None:
 		j['query']['filters']['map_filters'] = {}
 		j['query']['filters']['map_filters']['filters'] = {}
+
+		if rarity == "Unique": # Unique maps, may be unidentified
+			j['query']['filters']['type_filters'] = {}
+			j['query']['filters']['type_filters']['filters'] = {'rarity': {'option': 'unique'}}
+			j['query']['type'] = {'option': name}
+			name = None
+
 		if maps['blight']:
 			j['query']['filters']['map_filters']['filters']['map_blighted'] = 'True'
-		if maps['iiq']:
-			j['query']['filters']['map_filters']['filters']['map_iiq'] = {'min': maps['iiq'], 'max': 'null'}
+			itype = itype.replace("Blighted", "").strip()
+
+		if 'iiq' in maps:
+			if maps['iiq']:
+				j['query']['filters']['map_filters']['filters']['map_iiq'] = {'min': maps['iiq'], 'max': 'null'}
 
 		if 'iir' in maps: # False if Unidentified
 			if maps['iir']:
@@ -252,7 +295,8 @@ def query_trade(name = None, ilvl = None, itype = None, links = None, corrupted 
 
 	# If unique, Div Card, or Gem search by name
 	if rarity == "Unique" or itype == "Divination Card":
-		j['query']['name'] = name
+		if name != None:
+			j['query']['name'] = name
 
 	if itype == "Metamorph":
 		mm_parts = ["Brain", "Lung", "Eye", "Heart", "Liver"]
@@ -265,6 +309,9 @@ def query_trade(name = None, ilvl = None, itype = None, links = None, corrupted 
 	# Set itemtype. TODO: change to allow similar items of other base types... Unless base matters...
 	elif itype:
 		j['query']['type'] = itype
+
+	if itype == "Prophecy":
+		j['query']['name'] = name
 
 	# Only search for items online
 	j['query']['status'] = {}
@@ -298,7 +345,9 @@ def query_trade(name = None, ilvl = None, itype = None, links = None, corrupted 
 		j['query']['filters']['misc_filters']['filters']['ilvl'] = {'min': ilvl - 3, 'max': ilvl + 3}
 
 	fetch_called = False
-	
+
+	if DEBUG:
+		print(j)
 	# Find every stat
 	if stats:
 		j['query']['stats'] = [{}]
@@ -306,7 +355,7 @@ def query_trade(name = None, ilvl = None, itype = None, links = None, corrupted 
 		j['query']['stats'][0]['filters'] = []
 		for stat in stats:
 			(proper_affix, value) = find_affix_match(stat)
-			affix_types = ["implicit", "crafted", "explicit"]
+			affix_types = ["implicit", "crafted", "explicit", "enchantments"]
 			if any(atype in proper_affix for atype in affix_types): #If proper_affix is an actual mod...
 				j['query']['stats'][0]['filters'].append({'id': proper_affix, 'value': {'min': value, 'max': 999}})
 
@@ -343,8 +392,13 @@ def query_trade(name = None, ilvl = None, itype = None, links = None, corrupted 
 					fetch_called = True
 					results = fetch(res)
 
+					if DEBUG:
+						print("Found results!")
+
 
 					if result_prices_are_none(results):
+						if DEBUG:
+							print("All resulting prices are none.")
 						# Choose a non-priority mod
 						i = choose_bad_mod(j)
 
@@ -433,33 +487,28 @@ def create_pseudo_mods(j):
 			combined_filters.append(i)
 
 	# Dual elemental resists
-	for i in j['query']['stats'][0]['filters']:
-		if i['id'] in dual_resist_ids:
+		elif i['id'] in dual_resist_ids:
 			total_ele_resists += 2*int(i['value']['min'])
 			combined_filters.append(i)
 
 	# Triple elemental resists
-	for i in j['query']['stats'][0]['filters']:
-		if i['id'] in triple_resist_ids:
+		elif i['id'] in triple_resist_ids:
 			total_ele_resists += 3*int(i['value']['min'])
 			combined_filters.append(i)
 
 	# Solo chaos resists
-	for i in j['query']['stats'][0]['filters']:
-		if i['id'] in solo_chaos_resist_ids:
+		elif i['id'] in solo_chaos_resist_ids:
 			total_chaos_resist += int(i['value']['min'])
 			combined_filters.append(i)
 
 	# Dual chaos resists
-	for i in j['query']['stats'][0]['filters']:
-		if i['id'] in dual_chaos_resist_ids:
+		elif i['id'] in dual_chaos_resist_ids:
 			total_chaos_resist += int(i['value']['min'])
 			total_ele_resists += int(i['value']['min'])
 			combined_filters.append(i)
 
 	# Maximum life
-	for i in j['query']['stats'][0]['filters']:
-		if i['id'] in life_ids:
+		elif i['id'] in life_ids:
 			total_life += int(i['value']['min'])
 			combined_filters.append(i)
 
@@ -513,15 +562,11 @@ def choose_bad_mod(j):
 
 def result_prices_are_none(j):
 	"""
-	Determine if item is unpriced or not.
+	Determine if all items in result are unpriced or not.
 
 	Returns BOOLEAN
 	"""
-	for listing in j:
-		if listing['listing']['price'] == None:
-			return True
-
-	return False
+	return all(x['listing']['price'] == None for x in j)
 
 
 def query_exchange(qcur, league='Metamorph'):
@@ -546,6 +591,8 @@ def query_exchange(qcur, league='Metamorph'):
 
 		query = requests.post(f'https://www.pathofexile.com/api/trade/exchange/{league}', json=def_json)
 		res = query.json()
+		if DEBUG:
+			print(def_json)
 
 		if len(res['result']) == 0:
 			continue
@@ -585,7 +632,7 @@ def affix_equals(text, affix):
 		query = query + r" (Local)"
 
 	if text == query:
-		print("[+] Found mod " + Fore.GREEN + f"+{value}{text[1:]}") #TODO: support "# to # damage to attacks" type mods and other similar
+		print("[+] Found mod " + Fore.GREEN + f"{text[0:]}: {value}") #TODO: support "# to # damage to attacks" type mods and other similar
 		return (True, value)
 
 	return (False, 0)
@@ -595,13 +642,17 @@ def find_affix_match(affix):
 	"""
 	Search for the proper id to return the correct results.
 
-	returns tuple (id of the affix requested. value)
+	returns tuple (id of the affix requested, value)
 	"""
 	pseudos = stats['result'][0]['entries']
 	explicits = stats['result'][1]['entries']
 	implicits = stats['result'][2]['entries']
 	crafted = stats['result'][5]['entries']
+	enchantments = stats['result'][4]['entries']
 	proper_affix = ("", 0)
+
+	if DEBUG:
+		print("AFFIX:", affix)
 
 	if "(pseudo)" in affix:
 		for pseudo in pseudos:
@@ -622,10 +673,19 @@ def find_affix_match(affix):
 				proper_affix = (craft['id'], value)
 
 	else:
+		Found = False
 		for explicit in explicits:
 			(match, value) = affix_equals(explicit['text'], affix)
 			if match:
 				proper_affix = (explicit['id'], value)
+				Found = True
+
+		if not Found:
+			# Maybe it's an enchantment
+			for enchant in enchantments:
+				(match, value) = affix_equals(enchant['text'], affix)
+				if match:
+					proper_affix = (enchant['id'], value)
 
 	return proper_affix
 
@@ -679,7 +739,10 @@ def watch_clipboard():
 				if info:
 					# Uniques, only search by corrupted status, links, and name.
 					if (info.get('rarity') == 'Unique') and (info.get('itype') != "Metamorph"):
-						print(f'[*] Found Unique item in clipboard: {info["name"]} {info["itype"]}')
+						if info['name'] == info['itype']:
+							print(f'[*] Found Unique item in clipboard: {info["name"]}')
+						else:
+							print(f'[*] Found Unique item in clipboard: {info["name"]} {info["itype"]}')
 						base = f'Only showing results that are: '
 						pprint = base
 
@@ -695,7 +758,7 @@ def watch_clipboard():
 							print("[-]", pprint)
 
 						trade_info = query_trade(**{k:v for k, v in info.items() if k in ('name', 'links',
-								'corrupted', 'rarity')})
+								'corrupted', 'rarity', 'maps')})
 
 					elif info['itype'] == 'Currency':
 						print(f'[-] Found currency {info["name"]} in clipboard')
@@ -730,10 +793,11 @@ def watch_clipboard():
 					if trade_info:
 						# If more than 1 result, assemble price list.
 						if len(trade_info) > 1:
+							#print(trade_info[0]['item']['extended']) #TODO search this for bad mods
 							prev_account_name = ""
 							# Modify data to usable status.
 							prices = []
-							for trade in trade_info:
+							for trade in trade_info: # Stop price fixers
 								if trade['listing']['account']['name'] != prev_account_name:
 									prices.append(trade['listing']['price'])
 
@@ -752,13 +816,45 @@ def watch_clipboard():
 								total_count += prices[price_dict]
 
 							# Print the pretty string, ignoring trailing comma 
-							print(f'[$] Lowest {total_count} prices: {print_string[:-2]}\n\n')
+							print(f'[$] Price: {print_string[:-2]}\n\n')
+							if settings['use_gui'] == True:
+
+								price = [re.findall(r"([0-9.]+)", tprice)[0] for tprice in prices.keys()]
+
+								currency = None #TODO If a single result shows a higher tier, it currently presents only that value in the GUI.
+								if 'mir' in print_string:
+									currency = "mirror"
+								elif 'exa' in print_string:
+									currency = "exalt"
+								elif 'chaos' in print_string:
+									currency = "chaos"
+								elif 'alch' in print_string:
+									currency = "alchemy"
+
+
+								price.sort()
+
+								# Fastest method for calculating average as seen here:
+								# https://stackoverflow.com/questions/21230023/average-of-a-list-of-numbers-stored-as-strings-in-a-python-list
+								# TODO average between multiple currencies...
+								L = [float(n) for n in price if n]
+								average = str(round(sum(L)/float(len(L)) if L else '-', 2))
+
+								price = [price[0], average, price[-1]]
+
+								testGui.assemble_price_gui(price, currency)
 
 						else:
 							price = trade_info[0]['listing']['price']
 							if price != None:
-								price = f"{price['amount']} x {price['currency']}"
-							print("[$] Found one result with" + Fore.YELLOW + f" {price} " + Fore.WHITE + "as the price.\n\n")
+								price_val = price['amount']
+								price_curr = price['currency']
+								price = f"{price_val} x {price_curr}"
+
+								if settings['use_gui'] == True:
+									testGui.assemble_price_gui(price, currency)
+
+							print("[$] Price:" + Fore.YELLOW + f" {price} "+ "\n\n")
 
 					elif trade_info is not None:
 						print(f'[!] No results!')
@@ -774,6 +870,10 @@ if __name__ == "__main__":
 	init(autoreset=True) #Colorama
 	root = Tk()
 	root.withdraw()
-	watch_keyboard()
+
+	if settings['use_hotkeys'] == True:
+		import hotkeys
+		hotkeys.watch_keyboard()
+
 	watch_clipboard()
 	deinit() #Colorama
